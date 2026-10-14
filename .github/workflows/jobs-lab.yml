@@ -1,0 +1,48 @@
+# Lab 1.3 — Workflow → jobs → steps (course step 3)
+# Copy to: .github/workflows/jobs-lab.yml
+name: Jobs lab
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create a file
+        run: |
+          mkdir -p dist
+          echo "built at $(date -u)" > dist/app.txt
+          echo "Machine: $(hostname)"
+          ls -la dist
+
+      - name: Change directory and export a variable
+        run: |
+          cd dist
+          export GREETING=hello
+          echo "Inside this step: pwd=$(pwd)  GREETING=$GREETING"
+
+      - name: Next step starts with a fresh shell
+        run: |
+          echo "Next step: pwd=$(pwd)  GREETING=${GREETING:-<empty>}"
+          echo "...but files written by earlier steps are still here:"
+          cat dist/app.txt
+
+  lint:
+    # No "needs": runs at the same time as build, on another machine.
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "I run in PARALLEL with build. Machine $(hostname)"
+
+  deploy:
+    needs: build                       # waits for build to succeed
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Is build's file here?
+        run: |
+          echo "Machine: $(hostname)"
+          if [ -f dist/app.txt ]; then
+            echo "found dist/app.txt"
+          else
+            echo "dist/app.txt NOT found: this job runs on a different, fresh machine"
+          fi
