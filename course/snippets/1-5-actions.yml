@@ -1,0 +1,29 @@
+# Lab 1.5 — Actions vs run steps (course step 5)
+# Copy to: .github/workflows/actions-lab.yml
+name: Actions lab
+
+on:
+  workflow_dispatch:
+
+jobs:
+  without-actions:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: A fresh runner has no code yet
+        run: |
+          echo "Files in the workspace:"; ls -la
+          echo "Default Python: $(python3 --version)"
+      - name: So running the tests fails
+        run: |
+          python3 -m pytest || echo "Failed as expected: no code checked out, no dependencies installed"
+
+  with-actions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7            # action: clone this repo into the workspace
+      - uses: actions/setup-python@v7        # action: install an exact Python version
+        with:
+          python-version: "3.12"             # input to the action
+      - run: ls -la && python --version      # your own command
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q

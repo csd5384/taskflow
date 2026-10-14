@@ -1,0 +1,109 @@
+# Release pipeline: every merge to main is checked (full matrix), built ONCE into an
+# immutable image, deployed to staging automatically, then to production after approval.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "course/**"]   # docs-only merges don't redeploy
+  workflow_dispatch:
+
+permissions: {}                          # every job declares exactly what it needs
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read                     # a called workflow can't get more than this
+    with:
+      full-matrix: true
+
+  build:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write                    # the ONLY job that can publish images
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and push image to GHCR
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          IMAGE="ghcr.io/${REPO,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker build --build-arg APP_VERSION="$SHA" -t "$IMAGE:$SHA" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:latest"
+          DIGEST_REF=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:$SHA")
+          echo "image=$DIGEST_REF" >> "$GITHUB_OUTPUT"
+          { echo "### Image published"; echo "\`$DIGEST_REF\`"; } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: staging
+      url: ${{ vars.APP_URL }}
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false          # never interrupt a deploy; queue instead
+    permissions:
+      contents: read                     # checkout, to use the local composite action
+    env:
+      HAS_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+    steps:
+      - name: No deploy target configured
+        if: env.HAS_HOOK != 'true'
+        run: echo "::warning::RENDER_DEPLOY_HOOK is not set for 'staging'. Skipping the real deploy."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.HAS_HOOK == 'true'
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/deploy-render
+        if: env.HAS_HOOK == 'true'
+        with:
+          deploy-hook: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          image: ${{ needs.build.outputs.image }}
+          app-url: ${{ vars.APP_URL }}
+          expected-version: ${{ github.sha }}
+
+  deploy-production:
+    needs: [build, deploy-staging]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production                   # required reviewer + main-only rule (Settings)
+      url: ${{ vars.APP_URL }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      HAS_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+    steps:
+      - name: No deploy target configured
+        if: env.HAS_HOOK != 'true'
+        run: echo "::warning::RENDER_DEPLOY_HOOK is not set for 'production'. Skipping the real deploy."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.HAS_HOOK == 'true'
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/deploy-render
+        if: env.HAS_HOOK == 'true'
+        with:
+          deploy-hook: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          image: ${{ needs.build.outputs.image }}       # the SAME image staging got
+          app-url: ${{ vars.APP_URL }}
+          expected-version: ${{ github.sha }}

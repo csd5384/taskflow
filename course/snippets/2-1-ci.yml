@@ -1,0 +1,71 @@
+# Lab 2.1 — Contexts, expressions & variables (course step 7)
+# Copy to: .github/workflows/ci.yml  (replaces the Lab 1.6 version)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:                                   # workflow-level env: every job and step sees it
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          # Configuration variable with a fallback: change it in Settings, no commit needed
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Dump contexts (safely, through env)
+        env:
+          GITHUB_CONTEXT: ${{ toJSON(github) }}
+          RUNNER_CONTEXT: ${{ toJSON(runner) }}
+        run: |
+          echo "::group::github context"
+          echo "$GITHUB_CONTEXT"
+          echo "::endgroup::"
+          echo "::group::runner context"
+          echo "$RUNNER_CONTEXT"
+          echo "::endgroup::"
+
+      - name: Compute build info
+        id: info                        # an id is needed to read this step's outputs
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"   # step output
+          echo "BUILD_DATE=$(date -u +%F)" >> "$GITHUB_ENV"        # env var for later steps
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Type check
+        if: success() || failure()      # run even if lint failed (but not if cancelled)
+        run: mypy
+
+      - name: Test
+        if: success() || failure()
+        run: pytest -v
+
+      - name: Write run summary
+        if: always()
+        env:
+          SHORT_SHA: ${{ steps.info.outputs.short_sha }}
+          EVENT: ${{ github.event_name }}
+          PY: ${{ vars.PYTHON_VERSION || '3.12' }}
+        run: |
+          {
+            echo "### Taskflow CI"
+            echo "- Event: $EVENT"
+            echo "- Commit: \`$SHORT_SHA\` (built $BUILD_DATE)"
+            echo "- Python: $PY"
+          } >> "$GITHUB_STEP_SUMMARY"

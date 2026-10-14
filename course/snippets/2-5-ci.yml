@@ -1,0 +1,107 @@
+# Lab 2.5 — Artifacts vs caching (course step 11)
+# Copy to: .github/workflows/ci.yml  (replaces the Lab 2.4 version)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  quick-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      short_sha: ${{ steps.info.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+          cache: pip                               # CACHE #1: built into setup-python
+          cache-dependency-path: requirements-dev.txt
+      - name: Restore mypy cache                   # CACHE #2: explicit actions/cache
+        uses: actions/cache@v6
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ hashFiles('requirements-dev.txt', 'pyproject.toml', 'app/**/*.py') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-
+      - id: info
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      - name: Type check
+        if: success() || failure()
+        run: mypy
+
+  test:
+    needs: quick-checks
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["ubuntu-24.04", "windows-2025"]') }}
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Test with coverage
+        run: pytest -v --cov --cov-report=html --cov-report=xml --junitxml=junit.xml
+      - name: Upload test results and coverage    # ARTIFACT: a result you want to keep
+        if: always()                               # especially when tests failed
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}-py${{ matrix.python }}   # unique per combination
+          path: |
+            junit.xml
+            coverage.xml
+            htmlcov/
+          retention-days: 7
+
+  ci-passed:
+    needs: [quick-checks, test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: All CI jobs succeeded?
+        env:
+          SHORT_SHA: ${{ needs.quick-checks.outputs.short_sha }}
+          QUICK: ${{ needs.quick-checks.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          {
+            echo "### Taskflow CI for \`${SHORT_SHA:-?}\`"
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| quick-checks | $QUICK |"
+            echo "| test (all combinations) | $TEST |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$QUICK" = "success" && test "$TEST" = "success"
+
+  notify-failure:
+    needs: [quick-checks, test]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - env:
+          BRANCH: ${{ github.ref_name }}
+        run: echo "::error::CI failed on $BRANCH"
