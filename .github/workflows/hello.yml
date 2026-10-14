@@ -1,0 +1,23 @@
+# Lab 1.2 — Events → workflows (course step 2)
+# Copy to: .github/workflows/hello.yml
+name: Hello
+
+on:
+  push:                     # any push, any branch (you'll add a filter later in the lab)
+  workflow_dispatch:        # adds a "Run workflow" button in the Actions tab
+
+jobs:
+  hello:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Who triggered me?
+        env:
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "Event:  $EVENT"
+          echo "Branch: $BRANCH"
+          echo "Commit: $COMMIT"
+          echo "Actor:  $ACTOR"
