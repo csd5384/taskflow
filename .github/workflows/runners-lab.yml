@@ -1,0 +1,38 @@
+# Lab 1.4 — Runners (course step 4)
+# Copy to: .github/workflows/runners-lab.yml
+# Public repos run on GitHub-hosted runners for free, including Windows and macOS.
+name: Runners lab
+
+on:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: What machine did I get?
+        run: |
+          echo "OS: $RUNNER_OS / $RUNNER_ARCH"
+          echo "CPUs: $(nproc)"; free -h | head -2; df -h / | tail -1
+          echo "Pre-installed tools:"
+          python3 --version; node --version; docker --version; git --version
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - name: What machine did I get?
+        # Default shell on Windows runners is PowerShell (pwsh)
+        run: |
+          Write-Output "OS: $env:RUNNER_OS / $env:RUNNER_ARCH"
+          Write-Output "CPUs: $env:NUMBER_OF_PROCESSORS"
+          python --version
+          node --version
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - name: What machine did I get?
+        run: |
+          echo "OS: $RUNNER_OS / $RUNNER_ARCH"
+          echo "CPUs: $(sysctl -n hw.ncpu)"
+          python3 --version; node --version
