@@ -1,5 +1,6 @@
-# Reusable workflow (course step 16): the ONE definition of "is this code OK?".
-# Called by ci.yml (PRs), nightly.yml (schedule) and release.yml (before deploying).
+# Reusable workflow = CI: the ONE definition of "is this change OK?".
+# Checks the code, then builds the container image and tests the image itself.
+# Called by ci.yml (PRs), nightly.yml (schedule) and release.yml (before publishing).
 name: Checks
 
 on:
@@ -7,6 +8,10 @@ on:
     inputs:
       full-matrix:
         description: Test on Windows too (nightly and releases)
+        type: boolean
+        default: false
+      upload-image:
+        description: Upload the tested image as the "image" artifact (release publishes it)
         type: boolean
         default: false
     outputs:
@@ -30,7 +35,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-python-project      # composite action (step 17)
+      - uses: ./.github/actions/setup-python-project      # composite action
         with:
           python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
       - name: Restore mypy cache
@@ -111,8 +116,44 @@ jobs:
           path: pr-coverage/
           retention-days: 3
 
+  image:
+    # Build the deployable artifact and test the artifact itself, not just the code.
+    # release.yml publishes exactly this tested image; it is never rebuilt.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint Dockerfile (hadolint)
+        run: docker run --rm -i hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d < Dockerfile
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg APP_VERSION="$GITHUB_SHA" \
+            --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --tag taskflow:ci .
+      - name: Test the container
+        run: bash scripts/test-image.sh taskflow:ci "$GITHUB_SHA"
+      - name: Save image
+        run: docker save taskflow:ci --output taskflow-image.tar
+      - name: Scan for fixable HIGH/CRITICAL vulnerabilities (Trivy)
+        run: |
+          docker run --rm -v "$PWD:/work:ro" \
+            aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa \
+            image --input /work/taskflow-image.tar --scanners vuln --ignore-unfixed \
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress
+      - name: Upload image for release
+        if: inputs.upload-image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image
+          path: taskflow-image.tar
+          retention-days: 1
+
   ci-passed:
-    needs: [quick-checks, workflow-lint, test]
+    needs: [quick-checks, workflow-lint, test, image]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -123,6 +164,7 @@ jobs:
           QUICK: ${{ needs.quick-checks.result }}
           WFLINT: ${{ needs.workflow-lint.result }}
           TEST: ${{ needs.test.result }}
+          IMAGE: ${{ needs.image.result }}
           FULL: ${{ inputs.full-matrix }}
         run: |
           {
@@ -132,5 +174,7 @@ jobs:
             echo "| quick-checks | $QUICK |"
             echo "| workflow-lint | $WFLINT |"
             echo "| test (all combinations) | $TEST |"
+            echo "| image (build + test + scan) | $IMAGE |"
           } >> "$GITHUB_STEP_SUMMARY"
-          test "$QUICK" = "success" && test "$WFLINT" = "success" && test "$TEST" = "success"
+          test "$QUICK" = "success" && test "$WFLINT" = "success" && test "$TEST" = "success" \
+            && test "$IMAGE" = "success"

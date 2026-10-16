@@ -1,4 +1,4 @@
-# Safe PR comments, even on fork PRs (course step 15: split privilege)
+# Safe PR comments, even on fork PRs (split privilege)
 #
 # CI ran the PR's (possibly untrusted) code with NO secrets and a read-only token,
 # and uploaded coverage numbers as an artifact. This workflow has a write token

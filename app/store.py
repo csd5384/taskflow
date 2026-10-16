@@ -1,7 +1,7 @@
 """In-memory to-do storage.
 
 Deliberately simple: data lives in memory and resets when the app restarts.
-The course is about the pipeline, not the database.
+The project is about the pipeline, not the database.
 """
 
 from threading import Lock

@@ -5,9 +5,10 @@
 [![Nightly](https://github.com/OWNER/taskflow/actions/workflows/nightly.yml/badge.svg)](https://github.com/OWNER/taskflow/actions/workflows/nightly.yml)
 
 A small to-do API (FastAPI) with a **production-grade GitHub Actions CI/CD pipeline**:
-every pull request is linted, type-checked and tested; every merge is built once into an
-immutable container image, deployed to staging, smoke-tested, and promoted to production
-after manual approval.
+every pull request is linted, type-checked, tested, built into a container image and the
+image itself tested and scanned (CI); every merge publishes that tested image, deploys it
+to staging, smoke-tests it, and promotes it to production after manual approval (CD).
+`main` only changes through pull requests whose checks passed.
 
 **Live:** [staging](https://STAGING-URL) · [production](https://PRODUCTION-URL) ·
 each `/health` endpoint reports the deployed commit SHA.
@@ -16,28 +17,41 @@ each `/health` endpoint reports the deployed commit SHA.
 
 ```mermaid
 flowchart LR
-    PR[Pull request] --> CI["CI<br/>checks (small matrix)"]
-    CI --> Gate{checks / ci-passed<br/>required}
+    subgraph CI["CI: checks.yml (is this change OK?)"]
+        Code["lint · types · tests<br/>workflow lint"]
+        Img["build image<br/>test container · scan"]
+    end
+    PR[Pull request] --> CI
+    CI --> Gate{checks / ci-passed<br/>required to merge}
     Gate -->|merge| Main[main]
-    CI -. workflow_run .-> Cov[Coverage comment<br/>privileged, no PR code]
-    Main --> Rel["Release<br/>checks (full matrix)"]
-    Rel --> Build["Build image once<br/>GHCR @sha256 digest"]
-    Build --> Stg["Deploy staging<br/>+ smoke test"]
-    Stg --> Appr{Manual approval}
-    Appr --> Prod["Deploy production<br/>same digest + smoke test"]
-    Night[Nightly schedule] --> NC["checks (full matrix)"]
+    PR -. workflow_run .-> Cov[Coverage comment<br/>privileged, no PR code]
+    Main --> CI2["CI again<br/>(full matrix)"]
+    subgraph CD["CD: release.yml (ship it)"]
+        Pub["publish the tested image<br/>GHCR @sha256 digest"]
+        Stg["deploy staging<br/>+ smoke test"]
+        Appr{manual approval}
+        Prod["deploy production<br/>same digest + smoke test"]
+        Pub --> Stg --> Appr --> Prod
+    end
+    CI2 --> Pub
+    Night[Nightly schedule] --> NC["CI (full matrix)<br/>catches new CVEs too"]
 ```
 
 | Workflow | Trigger | What it does |
 |---|---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | Pull requests | Calls `checks.yml` with a fast Linux matrix; cancels superseded runs |
-| [`checks.yml`](.github/workflows/checks.yml) | Called (reusable) | Lint (ruff), strict types (mypy), workflow lint + security scan (actionlint, zizmor), tests on Python 3.12–3.14 (+ Windows in full mode), coverage artifacts, a single gate job |
-| [`release.yml`](.github/workflows/release.yml) | Push to `main` | Full checks → build and push image → staging → approval → production, each deploy verified by a smoke test |
+| [`checks.yml`](.github/workflows/checks.yml) | Called (reusable) | **CI.** Code: lint (ruff), strict types (mypy), workflow lint + security scan (actionlint, zizmor), tests on Python 3.12–3.14 (+ Windows in full mode), coverage. Artifact: Dockerfile lint (hadolint), image build, container tests ([`scripts/test-image.sh`](scripts/test-image.sh)), vulnerability scan (Trivy). One gate job: `ci-passed` |
+| [`release.yml`](.github/workflows/release.yml) | Push to `main` | **CD.** CI (full matrix) → publish the image CI tested → staging → approval → production, each deploy verified by a smoke test |
 | [`nightly.yml`](.github/workflows/nightly.yml) | Daily schedule | Full cross-platform matrix against `main` |
 | [`coverage-comment.yml`](.github/workflows/coverage-comment.yml) | After CI | Posts coverage on PRs (fork-safe: never executes PR code) |
 
-**Security and reliability practices:** least-privilege `permissions:` per job ·
-all actions pinned to commit SHAs and kept current by Dependabot (7-day cooldown) ·
+**Container tests** (run on the built image, before it can be published): non-root user ·
+size budget · no tests or dev dependencies inside · starts and honors `$PORT` · `/health`
+reports the exact commit · full to-do CRUD over HTTP · serves the UI · clean shutdown on SIGTERM.
+
+**Security and reliability practices:** ruleset on `main` (pull request + green
+`checks / ci-passed` required, no force pushes, no bypass) · least-privilege `permissions:` per job ·
+actions and the base image pinned to SHAs/digests and kept current by Dependabot (7-day cooldown) ·
 `persist-credentials: false` on checkout · environment-scoped deploy secrets ·
 protected production environment with required reviewer · deploys by immutable image
 digest · per-environment concurrency (deploys queue, never cancel) · job timeouts ·
@@ -53,6 +67,7 @@ uvicorn app.main:app --reload                        # http://localhost:8000
 ```
 
 Or with Docker: `docker build -t taskflow . && docker run -p 8000:8000 taskflow`.
+Test the image like CI does: `bash scripts/test-image.sh taskflow dev` (needs curl and jq).
 
 ## API
 
@@ -73,13 +88,7 @@ Data is in memory by design: the project's focus is the delivery pipeline.
 app/                    FastAPI app + minimal web UI
 tests/                  pytest suite
 Dockerfile              non-root production image; APP_VERSION baked in at build
+scripts/test-image.sh   container tests for the built image
 .github/workflows/      the pipeline (see table above)
 .github/actions/        composite actions: setup-python-project, deploy-render
-course/                 the step-by-step course this pipeline was built with
 ```
-
-## How this was built
-
-The pipeline was built incrementally through a 20-step hands-on course on GitHub Actions,
-included in [`course/`](course/README.md): from a first "hello" workflow to reusable
-workflows, OIDC, supply-chain hardening, and self-hosted runners.

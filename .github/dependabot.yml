@@ -1,4 +1,4 @@
-# Keep pinned actions and dependencies updated (course step 15)
+# Keep pinned actions and dependencies updated
 version: 2
 updates:
   - package-ecosystem: "github-actions"   # bumps the SHA pins + "# vX.Y.Z" comments
@@ -19,3 +19,9 @@ updates:
     groups:
       python:
         patterns: ["*"]
+  - package-ecosystem: "docker"           # bumps the FROM digest in the Dockerfile
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7                     # let new releases age a week (supply-chain safety)

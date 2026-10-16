@@ -1,4 +1,4 @@
-# Composite action (course step 17): replaces the same 2 setup steps in every job.
+# Composite action: replaces the same 2 setup steps in every job.
 # Requires actions/checkout to have run first (this file lives in the repo).
 name: Set up Python project
 description: Install Python with pip caching and install the project's dev dependencies

@@ -1,4 +1,4 @@
-# Composite action (course step 17): one deploy procedure for every environment.
+# Composite action: one deploy procedure for every environment.
 name: Deploy to Render
 description: Deploy an exact image to a Render service and wait until /health reports the expected version
 

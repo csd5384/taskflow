@@ -1,7 +1,6 @@
 .git
 .github
 .venv
-course
 tests
 **/__pycache__
 .pytest_cache
