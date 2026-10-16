@@ -11,7 +11,10 @@ ENV APP_VERSION=${APP_VERSION} \
 
 WORKDIR /srv
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pip is only needed to build the image: removing it also removes its vendored
+# libraries (urllib3, msgpack, ...) and their vulnerabilities from what we ship.
+RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt \
+    && pip uninstall --yes --root-user-action=ignore pip
 
 COPY app ./app
 # Numeric UID: hosts (e.g. Kubernetes runAsNonRoot) can verify it is not root.

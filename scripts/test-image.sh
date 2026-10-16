@@ -60,6 +60,11 @@ if docker run --rm "$IMAGE" sh -c 'test -e tests || python -c "import pytest"' 2
 fi
 pass "no tests/ or dev dependencies in the image"
 
+if docker run --rm "$IMAGE" python -m pip --version > /dev/null 2>&1; then
+  fail "pip is inside the image (it is only needed at build time)"
+fi
+pass "no pip in the image"
+
 # --- The running container ----------------------------------------------------
 docker run --detach --name "$NAME" --env PORT="$PORT" \
   --publish "127.0.0.1:$PORT:$PORT" "$IMAGE" > /dev/null
