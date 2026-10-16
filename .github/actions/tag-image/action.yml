@@ -1,0 +1,37 @@
+# Composite action: record in the registry which image an environment runs.
+# Moves a tag (e.g. :staging, :production) to an exact digest; nothing is pulled or rebuilt.
+name: Tag image
+description: Point an environment tag in GHCR at an exact image digest and verify it
+
+inputs:
+  image:
+    description: Immutable image reference, e.g. ghcr.io/owner/repo@sha256:...
+    required: true
+  tag:
+    description: Tag to move to that image, e.g. production
+    required: true
+  token:
+    description: Token with packages:write (pass github.token)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Move the tag and verify it
+      shell: bash
+      env:                               # inputs go through env, never spliced into the script
+        IMAGE: ${{ inputs.image }}
+        TAG: ${{ inputs.tag }}
+        TOKEN: ${{ inputs.token }}
+        ACTOR: ${{ github.actor }}
+      run: |
+        REPO="${IMAGE%@*}"
+        DIGEST="${IMAGE#*@}"
+        echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+        docker buildx imagetools create --tag "$REPO:$TAG" "$IMAGE"
+        ACTUAL=$(docker buildx imagetools inspect "$REPO:$TAG" --format '{{.Manifest.Digest}}')
+        if [ "$ACTUAL" != "$DIGEST" ]; then
+          echo "::error::$REPO:$TAG points to $ACTUAL, expected $DIGEST"; exit 1
+        fi
+        echo "$REPO:$TAG -> $DIGEST"
+        { echo "### \`:$TAG\` now points to"; echo "\`$IMAGE\`"; } >> "$GITHUB_STEP_SUMMARY"

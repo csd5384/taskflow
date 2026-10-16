@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      packages: write                    # the ONLY job that can publish images
+      packages: write                    # the ONLY job that pushes new images
     outputs:
       image: ${{ steps.push.outputs.image }}
     steps:
@@ -63,7 +63,8 @@ jobs:
       group: deploy-staging
       cancel-in-progress: false          # never interrupt a deploy; queue instead
     permissions:
-      contents: read                     # checkout, to use the local composite action
+      contents: read                     # checkout, to use the local composite actions
+      packages: write                    # move the :staging tag (no new images)
     env:
       HAS_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
     steps:
@@ -81,6 +82,12 @@ jobs:
           image: ${{ needs.publish.outputs.image }}
           app-url: ${{ vars.APP_URL }}
           expected-version: ${{ github.sha }}
+      - uses: ./.github/actions/tag-image  # only after the smoke test passed
+        if: env.HAS_HOOK == 'true'
+        with:
+          image: ${{ needs.publish.outputs.image }}
+          tag: staging
+          token: ${{ github.token }}
 
   deploy-production:
     needs: [publish, deploy-staging]
@@ -94,6 +101,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
+      packages: write                    # move the :production tag (no new images)
     env:
       HAS_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
     steps:
@@ -111,3 +119,9 @@ jobs:
           image: ${{ needs.publish.outputs.image }}       # the SAME image staging got
           app-url: ${{ vars.APP_URL }}
           expected-version: ${{ github.sha }}
+      - uses: ./.github/actions/tag-image  # only after the smoke test passed
+        if: env.HAS_HOOK == 'true'
+        with:
+          image: ${{ needs.publish.outputs.image }}
+          tag: production
+          token: ${{ github.token }}
