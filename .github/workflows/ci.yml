@@ -1,5 +1,5 @@
-# Lab 2.4 — Matrix builds (course step 10)
-# Copy to: .github/workflows/ci.yml  (replaces the Lab 2.3 version)
+# Lab 2.5 — Artifacts vs caching (course step 11)
+# Copy to: .github/workflows/ci.yml  (replaces the Lab 2.4 version)
 name: CI
 
 on:
@@ -26,8 +26,15 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
-          cache: pip
+          cache: pip                               # CACHE #1: built into setup-python
           cache-dependency-path: requirements-dev.txt
+      - name: Restore mypy cache                   # CACHE #2: explicit actions/cache
+        uses: actions/cache@v6
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ hashFiles('requirements-dev.txt', 'pyproject.toml', 'app/**/*.py') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-
       - id: info
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - run: pip install -r requirements-dev.txt
@@ -43,11 +50,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
-      fail-fast: false                     # finish every combination: full compatibility picture
+      fail-fast: false
       matrix:
-        # Small matrix on PRs (fast, cheap); add Windows everywhere else.
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["ubuntu-24.04", "windows-2025"]') }}
-        python: ["3.12", "3.13", "3.14"]   # quoted! unquoted 3.10 would become 3.1
+        python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -56,12 +62,22 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
-      - run: pytest -v
+      - name: Test with coverage
+        run: pytest -v --cov --cov-report=html --cov-report=xml --junitxml=junit.xml
+      - name: Upload test results and coverage    # ARTIFACT: a result you want to keep
+        if: always()                               # especially when tests failed
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}-py${{ matrix.python }}   # unique per combination
+          path: |
+            junit.xml
+            coverage.xml
+            htmlcov/
+          retention-days: 7
 
-  # ONE stable required check, whatever the matrix looks like.
   ci-passed:
     needs: [quick-checks, test]
-    if: always()                           # a skipped required check counts as passing, so always run
+    if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
