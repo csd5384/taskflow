@@ -14,8 +14,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-RUN useradd --create-home appuser
-USER appuser
+# Numeric UID: hosts (e.g. Kubernetes runAsNonRoot) can verify it is not root.
+RUN useradd --create-home --no-log-init --uid 10001 appuser
+USER 10001
 
 EXPOSE 8000
 # Render (and most hosts) tell the app which port to use via $PORT.
