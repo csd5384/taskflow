@@ -1,0 +1,17 @@
+# Nightly: the full matrix (Linux + Windows, Python 3.12-3.14) against main,
+# so slow or platform-specific breakage is caught even on quiet days.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "23 2 * * *"               # 02:23 UTC daily (off the hour = less queueing)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    with:
+      full-matrix: true
