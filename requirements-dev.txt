@@ -1,7 +1,7 @@
 # Everything CI needs: runtime deps + test, lint and type-check tools
 -r requirements.txt
-pytest==8.3.5
+pytest==9.1.1
 pytest-cov==7.1.0
 httpx==0.28.1
-ruff==0.16.8
+ruff==0.17.0
 mypy==2.4.0
