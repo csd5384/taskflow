@@ -1,16 +1,25 @@
-# Lab 3.2 — Environments & deployments (course step 12)
-# Copy to: .github/workflows/release.yml  (replaces the Lab 3.1 version)
+# Lab 4.1 — Release calls the reusable checks first (course step 16)
+# Copy to: .github/workflows/release.yml  (replaces the Lab 3.5 version)
 name: Release
 
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "course/**"]   # docs-only merges don't redeploy
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read                     # a called workflow can't get more than this
+    with:
+      full-matrix: true
+
   build:
+    needs: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -19,7 +28,7 @@ jobs:
     outputs:
       image: ${{ steps.push.outputs.image }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Build and push image to GHCR
