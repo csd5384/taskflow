@@ -53,7 +53,7 @@ gh secret set DEMO_SECRET
 ```
 
 When prompted, paste `not-a-real-secret-123` and press Enter.
-
+#### stopped here
 **2. Add the lab workflow** (it needs to be on `main` for the Run button):
 
 ```powershell
