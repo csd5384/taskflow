@@ -1,5 +1,5 @@
-# Lab 3.2 — Environments & deployments (course step 12)
-# Copy to: .github/workflows/release.yml  (replaces the Lab 3.1 version)
+# Lab 3.5 — Release workflow with SHA-pinned actions (course step 15)
+# Copy to: .github/workflows/release.yml  (replaces the Lab 3.2 version)
 name: Release
 
 on:
@@ -19,7 +19,7 @@ jobs:
     outputs:
       image: ${{ steps.push.outputs.image }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Build and push image to GHCR
