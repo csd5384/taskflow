@@ -1,0 +1,53 @@
+# Lab 3.4 — OIDC: mint a real GitHub ID token and inspect its claims (course step 14)
+# Copy to: .github/workflows/oidc-lab.yml
+# The token itself is a credential (short-lived), so we only ever print its CLAIMS.
+name: OIDC lab
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  no-environment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      id-token: write                    # allows requesting an ID token, nothing else
+    steps:
+      - name: Mint an ID token and show its claims
+        run: |
+          TOKEN=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=taskflow-lab" | python3 -c 'import sys, json; print(json.load(sys.stdin)["value"])')
+          echo "::add-mask::$TOKEN"
+          printf '%s' "$TOKEN" | python3 -c '
+          import base64, json, sys, time
+          payload = sys.stdin.read().split(".")[1]
+          claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+          for key in ["iss", "aud", "sub", "repository", "ref", "environment",
+                      "workflow", "job_workflow_ref", "actor", "event_name", "sha"]:
+              print(f"{key:18} {claims.get(key, chr(45))}")
+          print("expires in        ", int(claims["exp"] - time.time()), "seconds")
+          '
+
+  with-environment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging                 # watch how "sub" changes
+    permissions:
+      id-token: write
+    steps:
+      - name: Mint an ID token and show its claims
+        run: |
+          TOKEN=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=taskflow-lab" | python3 -c 'import sys, json; print(json.load(sys.stdin)["value"])')
+          echo "::add-mask::$TOKEN"
+          printf '%s' "$TOKEN" | python3 -c '
+          import base64, json, sys, time
+          payload = sys.stdin.read().split(".")[1]
+          claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+          for key in ["iss", "aud", "sub", "repository", "ref", "environment",
+                      "workflow", "job_workflow_ref", "actor", "event_name", "sha"]:
+              print(f"{key:18} {claims.get(key, chr(45))}")
+          print("expires in        ", int(claims["exp"] - time.time()), "seconds")
+          '
