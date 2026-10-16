@@ -1,5 +1,5 @@
-# Lab 3.1 — Build once, publish an image (bridge into Part 3)
-# Copy to: .github/workflows/release.yml
+# Lab 3.2 — Environments & deployments (course step 12)
+# Copy to: .github/workflows/release.yml  (replaces the Lab 3.1 version)
 name: Release
 
 on:
@@ -7,22 +7,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions: {}                         # nothing by default; each job asks for what it needs
+permissions: {}
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
-      contents: read                    # checkout
-      packages: write                   # push to GitHub Container Registry (GHCR)
+      contents: read
+      packages: write
     outputs:
-      image: ${{ steps.push.outputs.image }}     # immutable reference: image@sha256:...
+      image: ${{ steps.push.outputs.image }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
       - name: Build and push image to GHCR
         id: push
         env:
@@ -31,14 +30,103 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
-          IMAGE="ghcr.io/${REPO,,}"                 # GHCR names must be lowercase
+          IMAGE="ghcr.io/${REPO,,}"
           echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           docker build --build-arg APP_VERSION="$SHA" -t "$IMAGE:$SHA" -t "$IMAGE:latest" .
           docker push "$IMAGE:$SHA"
           docker push "$IMAGE:latest"
           DIGEST_REF=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:$SHA")
           echo "image=$DIGEST_REF" >> "$GITHUB_OUTPUT"
-          {
-            echo "### Image published"
-            echo "\`$DIGEST_REF\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### Image published"; echo "\`$DIGEST_REF\`"; } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: staging                      # environment secrets/vars + protection rules
+      url: ${{ vars.APP_URL }}           # "View deployment" link
+    concurrency:
+      group: deploy-staging              # one deploy at a time, never cancelled
+      cancel-in-progress: false
+    permissions: {}                      # needs nothing from GitHub
+    env:
+      HAS_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+    steps:
+      - name: No deploy target configured
+        if: env.HAS_HOOK != 'true'
+        run: echo "::warning::RENDER_DEPLOY_HOOK is not set for 'staging'. Skipping the real deploy (Lab 3.2)."
+
+      - name: Trigger deploy on Render
+        if: env.HAS_HOOK == 'true'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          ENCODED=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["IMAGE"], safe=""))')
+          curl --fail --silent --show-error -X POST "${HOOK}&imgURL=${ENCODED}" > /dev/null
+          echo "Deploy triggered for $IMAGE"
+
+      - name: Smoke test (wait until the new version is live)
+        if: env.HAS_HOOK == 'true'
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          EXPECTED: ${{ github.sha }}
+        run: |
+          for i in $(seq 1 40); do
+            VERSION=$(curl -fsS --max-time 10 "$APP_URL/health" | python3 -c 'import sys, json; print(json.load(sys.stdin)["version"])' 2>/dev/null || true)
+            echo "Attempt $i: live version = ${VERSION:-unreachable}"
+            if [ "$VERSION" = "$EXPECTED" ]; then
+              echo "New version is live"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Version $EXPECTED did not go live within 10 minutes"
+          exit 1
+
+  deploy-production:
+    needs: [build, deploy-staging]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production                   # required reviewer configured in Settings
+      url: ${{ vars.APP_URL }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions: {}
+    env:
+      HAS_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+    steps:
+      - name: No deploy target configured
+        if: env.HAS_HOOK != 'true'
+        run: echo "::warning::RENDER_DEPLOY_HOOK is not set for 'production'. Skipping the real deploy."
+
+      - name: Trigger deploy on Render (the SAME image staging got)
+        if: env.HAS_HOOK == 'true'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          ENCODED=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["IMAGE"], safe=""))')
+          curl --fail --silent --show-error -X POST "${HOOK}&imgURL=${ENCODED}" > /dev/null
+          echo "Deploy triggered for $IMAGE"
+
+      - name: Smoke test
+        if: env.HAS_HOOK == 'true'
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          EXPECTED: ${{ github.sha }}
+        run: |
+          for i in $(seq 1 40); do
+            VERSION=$(curl -fsS --max-time 10 "$APP_URL/health" | python3 -c 'import sys, json; print(json.load(sys.stdin)["version"])' 2>/dev/null || true)
+            echo "Attempt $i: live version = ${VERSION:-unreachable}"
+            if [ "$VERSION" = "$EXPECTED" ]; then
+              echo "New version is live"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Version $EXPECTED did not go live within 10 minutes"
+          exit 1
