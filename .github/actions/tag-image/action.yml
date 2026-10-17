@@ -25,11 +25,29 @@ runs:
         TOKEN: ${{ inputs.token }}
         ACTOR: ${{ github.actor }}
       run: |
+        # Re-upload the image's manifest, byte for byte, under the new tag, via the
+        # registry API. Same bytes = same digest. (docker buildx imagetools create
+        # would wrap it in a new manifest list with a different digest.)
         REPO="${IMAGE%@*}"
         DIGEST="${IMAGE#*@}"
-        echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-        docker buildx imagetools create --tag "$REPO:$TAG" "$IMAGE"
-        ACTUAL=$(docker buildx imagetools inspect "$REPO:$TAG" --format '{{.Manifest.Digest}}')
+        NAME="${REPO#ghcr.io/}"
+        API="https://ghcr.io/v2/$NAME/manifests"
+        ACCEPT="application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json"
+        ACCEPT="$ACCEPT,application/vnd.docker.distribution.manifest.list.v2+json"
+        ACCEPT="$ACCEPT,application/vnd.docker.distribution.manifest.v2+json"
+        MANIFEST=$(mktemp)
+
+        BEARER=$(curl -fsS -u "$ACTOR:$TOKEN" \
+          "https://ghcr.io/token?service=ghcr.io&scope=repository:$NAME:pull,push" | jq -r .token)
+        echo "::add-mask::$BEARER"
+
+        TYPE=$(curl -fsS -H "Authorization: Bearer $BEARER" -H "Accept: $ACCEPT" \
+          -o "$MANIFEST" -w '%{content_type}' "$API/$DIGEST")
+        curl -fsS -X PUT -H "Authorization: Bearer $BEARER" -H "Content-Type: $TYPE" \
+          --data-binary "@$MANIFEST" "$API/$TAG" > /dev/null
+
+        ACTUAL=$(curl -fsS -I -H "Authorization: Bearer $BEARER" -H "Accept: $ACCEPT" "$API/$TAG" \
+          | tr -d '\r' | awk -F': ' 'tolower($1) == "docker-content-digest" { print $2 }')
         if [ "$ACTUAL" != "$DIGEST" ]; then
           echo "::error::$REPO:$TAG points to $ACTUAL, expected $DIGEST"; exit 1
         fi
