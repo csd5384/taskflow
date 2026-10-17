@@ -8,18 +8,18 @@ A small to-do API (FastAPI) with a **production-grade GitHub Actions CI/CD pipel
 every pull request is linted, type-checked, tested, built into a container image and the
 image itself tested and scanned (CI); every merge publishes that tested image, deploys it
 to staging, smoke-tests it, and promotes it to production after manual approval (CD).
-`main` only changes through pull requests whose checks passed.
+Nothing deploys unless CI passes on `main`, and production needs a manual approval.
 
 **Live:** [staging](https://STAGING-URL) · [production](https://PRODUCTION-URL) ·
 each `/health` endpoint reports the deployed commit SHA.
 
 ## How a change ships
 
-1. **Push a feature branch.** Nothing runs yet; `main` cannot be pushed to directly.
+1. **Push a feature branch.** Nothing runs yet.
 2. **Open a pull request into `main`.** CI runs on every push to the PR.
-3. **CI passes.** `checks / ci-passed` must be green.
-4. **Review.** Recommended, not enforced: the repo has a single maintainer and GitHub does not
-   let authors approve their own PRs. With a team, set required approvals to 1 in the ruleset.
+3. **CI passes.** Wait for `checks / ci-passed` to be green before merging.
+4. **Review.** Recommended: the repo has a single maintainer, and GitHub does not let authors
+   approve their own PRs.
 5. **Merge.** That push to `main` starts the release: CI runs again on the merged code,
    then the tested image is published and deployed to **staging**.
 6. **Approve production.** After the staging smoke test passes, a reviewer approves the
@@ -28,6 +28,11 @@ each `/health` endpoint reports the deployed commit SHA.
 Each environment's registry tag (`:staging`, `:production`) moves to the deployed digest only
 after its smoke test passes, so GHCR always shows what each environment runs.
 Both environments only accept deploys from `main`.
+
+`main` has no branch protection (single-maintainer repo), so this procedure is a convention:
+a direct push to `main` would skip the PR, but still goes through the full CI run in
+`release.yml` before anything is published or deployed. With a team, add a ruleset on `main`
+that requires a pull request, the `checks / ci-passed` status check, and 1 approval.
 
 ## The pipeline
 
@@ -65,8 +70,8 @@ flowchart LR
 size budget · no tests or dev dependencies inside · starts and honors `$PORT` · `/health`
 reports the exact commit · full to-do CRUD over HTTP · serves the UI · clean shutdown on SIGTERM.
 
-**Security and reliability practices:** ruleset on `main` (pull request + green
-`checks / ci-passed` required, no force pushes, no bypass) · least-privilege `permissions:` per job ·
+**Security and reliability practices:** full CI gates every publish and deploy ·
+least-privilege `permissions:` per job ·
 actions and the base image pinned to SHAs/digests and kept current by Dependabot (7-day cooldown) ·
 `persist-credentials: false` on checkout · environment-scoped deploy secrets ·
 protected production environment with required reviewer · deploys by immutable image
